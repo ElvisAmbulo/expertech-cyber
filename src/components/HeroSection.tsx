@@ -58,7 +58,7 @@ const HeroSection = () => {
 
           <div className="flex items-center gap-2 mt-8 text-primary-foreground/60 text-sm">
             <MapPin className="h-4 w-4" />
-            <span>Serving Nationwide</span>
+            <span className="text-accent">Serving Nationwide</span>
           </div>
         </motion.div>
       </div>
