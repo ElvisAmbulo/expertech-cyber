@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, X } from "lucide-react";
+import { Upload, FileText, X, Loader2 } from "lucide-react"; // Added Loader2
 import { useToast } from "@/hooks/use-toast";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; // Firebase Storage tools
+import { storage } from "@/firebase"; // Adjust this path based on where your firebase.ts is
 
 const UploadPrint = () => {
   const { toast } = useToast();
@@ -9,6 +11,7 @@ const UploadPrint = () => {
   const [printType, setPrintType] = useState<"bw" | "color">("bw");
   const [whatsapp, setWhatsapp] = useState("");
   const [copies, setCopies] = useState("1");
+  const [isUploading, setIsUploading] = useState(false); // New loading state
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -23,8 +26,10 @@ const UploadPrint = () => {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validations
     if (files.length === 0) {
       toast({ title: "Please upload at least one file", variant: "destructive" });
       return;
@@ -33,12 +38,48 @@ const UploadPrint = () => {
       toast({ title: "Please enter a valid Kenyan phone number", variant: "destructive" });
       return;
     }
-    // Build WhatsApp message
-    const msg = encodeURIComponent(
-      `Hi Expertech! 🖨️\nI'd like to print:\n- ${files.map((f) => f.name).join("\n- ")}\n- Type: ${printType === "bw" ? "Black & White" : "Color"}\n- Copies: ${copies}\nMy WhatsApp: ${whatsapp}`
-    );
-    window.open(`https://wa.me/254746721989?text=${msg}`, "_blank");
-    toast({ title: "Redirecting to WhatsApp...", description: "Send the message to confirm your print job." });
+
+    setIsUploading(true); // Start loading
+
+    try {
+      // 1. Upload files to Firebase Storage
+      const uploadPromises = files.map(async (file) => {
+        const fileRef = ref(storage, `prints/${Date.now()}-${file.name}`);
+        const snapshot = await uploadBytes(fileRef, file);
+        return await getDownloadURL(snapshot.ref);
+      });
+
+      const fileUrls = await Promise.all(uploadPromises);
+
+      // 2. Build WhatsApp message with Links
+      const linksText = fileUrls.map((url, i) => `Link ${i + 1}: ${url}`).join("\n\n");
+      
+      const msg = encodeURIComponent(
+        `Hi Expertech! 🖨️\nI'd like to print these files:\n\n${linksText}\n\n` +
+        `- Type: ${printType === "bw" ? "Black & White" : "Color"}\n` +
+        `- Copies: ${copies}\n` +
+        `- My WhatsApp: ${whatsapp}`
+      );
+
+      // 3. Open WhatsApp
+      window.open(`https://wa.me/254796867637?text=${msg}`, "_blank");
+      
+      toast({ 
+        title: "Redirecting to WhatsApp...", 
+        description: "Files uploaded successfully! Send the message to confirm." 
+      });
+      
+      setFiles([]); // Clear files after success
+    } catch (error) {
+      console.error(error);
+      toast({ 
+        title: "Upload failed", 
+        description: "There was an error saving your files. Please try again.",
+        variant: "destructive" 
+      });
+    } finally {
+      setIsUploading(false); // Stop loading
+    }
   };
 
   return (
@@ -54,7 +95,7 @@ const UploadPrint = () => {
             Upload & <span className="text-primary">Print</span>
           </h2>
           <p className="text-muted-foreground">
-            Send us your files and we'll have them ready for pickup. Fast, easy, reliable.
+            Your files are uploaded securely. We'll notify you on WhatsApp when they are ready.
           </p>
         </motion.div>
 
@@ -78,6 +119,7 @@ const UploadPrint = () => {
                 accept=".pdf,image/*"
                 onChange={handleFileChange}
                 className="hidden"
+                disabled={isUploading}
               />
             </label>
             {files.length > 0 && (
@@ -86,7 +128,12 @@ const UploadPrint = () => {
                   <div key={i} className="flex items-center gap-2 bg-muted rounded-md px-3 py-2 text-sm">
                     <FileText className="h-4 w-4 text-primary flex-shrink-0" />
                     <span className="flex-1 truncate">{f.name}</span>
-                    <button type="button" onClick={() => removeFile(i)} className="text-muted-foreground hover:text-foreground">
+                    <button 
+                      type="button" 
+                      onClick={() => removeFile(i)} 
+                      className="text-muted-foreground hover:text-foreground"
+                      disabled={isUploading}
+                    >
                       <X className="h-4 w-4" />
                     </button>
                   </div>
@@ -104,6 +151,7 @@ const UploadPrint = () => {
                   key={val}
                   type="button"
                   onClick={() => setPrintType(val)}
+                  disabled={isUploading}
                   className={`flex-1 rounded-lg border-2 py-3 text-sm font-medium transition-all ${
                     printType === val
                       ? "border-primary bg-primary/5 text-primary"
@@ -125,6 +173,7 @@ const UploadPrint = () => {
               max="100"
               value={copies}
               onChange={(e) => setCopies(e.target.value)}
+              disabled={isUploading}
               className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
@@ -137,16 +186,24 @@ const UploadPrint = () => {
               placeholder="e.g. 0746721989"
               value={whatsapp}
               onChange={(e) => setWhatsapp(e.target.value)}
+              disabled={isUploading}
               className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <p className="text-xs text-muted-foreground mt-1">We'll notify you on WhatsApp when your print is ready.</p>
           </div>
 
           <button
             type="submit"
-            className="w-full rounded-lg bg-primary py-3.5 font-semibold text-primary-foreground transition-all hover:brightness-110 shadow-md"
+            disabled={isUploading}
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-3.5 font-semibold text-primary-foreground transition-all hover:brightness-110 shadow-md disabled:opacity-70"
           >
-            Send Print Request via WhatsApp
+            {isUploading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              "Send Print Request via WhatsApp"
+            )}
           </button>
         </motion.form>
       </div>
